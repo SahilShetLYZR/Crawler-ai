@@ -1,0 +1,7 @@
+crawl4ai
+playwright
+httpx
+selectolax
+beautifulsoup4
+lxml
+loguru
