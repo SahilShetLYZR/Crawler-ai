@@ -1,17 +1,62 @@
-FROM public.ecr.aws/lambda/python:3.11
+# Use Debian Bullseye image for glibc compatibility and Lambda RIC support
+FROM public.ecr.aws/docker/library/python:3.10-slim-bullseye
 
-# Install dependencies
-COPY requirements.txt .
+WORKDIR /app
+
+# Set environment variables for Playwright
+ENV PLAYWRIGHT_BROWSERS_PATH=/tmp/ms-playwright
+
+# Install system dependencies for Playwright and headless Chromium
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    wget \
+    curl \
+    gnupg \
+    ca-certificates \
+    build-essential \
+    libglib2.0-0 \
+    libnss3 \
+    libnspr4 \
+    libatk1.0-0 \
+    libatk-bridge2.0-0 \
+    libcups2 \
+    libdrm2 \
+    libxkbcommon0 \
+    libxcomposite1 \
+    libxdamage1 \
+    libxfixes3 \
+    libxrandr2 \
+    libgbm1 \
+    libpango-1.0-0 \
+    libcairo2 \
+    libasound2 \
+    libexpat1 && \
+    rm -rf /var/lib/apt/lists/*
+
+# Copy requirements and install Python dependencies
+COPY requirements.txt ./
 RUN pip install --no-cache-dir -r requirements.txt
 
-# Install Playwright and Chromium
-RUN playwright install chromium
+# Install Playwright and its dependencies
+RUN pip install --no-cache-dir playwright && \
+    playwright install-deps chromium && \
+    mkdir -p /tmp/ms-playwright && \
+    playwright install chromium && \
+    chmod -R 777 /tmp/ms-playwright && \
+    # Ensure browser binary is executable
+    find /tmp/ms-playwright -name chrome -type f -exec chmod +x {} \; && \
+    find /tmp/ms-playwright -name chrome_sandbox -type f -exec chmod 4755 {} \;
 
-# Set browser path (optional override)
-ENV PLAYWRIGHT_BROWSERS_PATH=/home/chromium
+# Copy verification script and run it during build
+COPY verify_browser.py ./
+RUN python3 verify_browser.py
 
-# Copy app code
+# Copy application code
 COPY app.py ./
 
-# Command to run the handler
-CMD ["app.lambda_handler"]
+# Health check
+HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=3 \
+  CMD curl -f http://localhost:8000/health || exit 1
+
+# Expose port and run the application
+EXPOSE 8000
+CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000"]
