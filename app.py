@@ -81,7 +81,7 @@ async def crawl(request: CrawlRequest):
             page = await context.new_page()
             
             # Navigate to the URL
-            await page.goto(request.url, wait_until="load", timeout=60000)
+            await page.goto(request.url, wait_until="load", timeout=120000)
 
             # Extract content
             title = await page.title()
@@ -213,7 +213,8 @@ async def fetch_link(request: CrawlRequest):
             page = await context.new_page()
 
             # Navigate to the URL
-            await page.goto(request.url, wait_until="networkidle")
+            await page.goto(request.url, wait_until="load", timeout=120000)
+
 
             # Extract content
             title = await page.title()
