@@ -81,8 +81,8 @@ async def crawl(request: CrawlRequest):
             page = await context.new_page()
             
             # Navigate to the URL
-            await page.goto(request.url, wait_until="networkidle")
-            
+            await page.goto(request.url, wait_until="load", timeout=60000)
+
             # Extract content
             title = await page.title()
             content = await page.content()
