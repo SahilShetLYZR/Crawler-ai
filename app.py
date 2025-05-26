@@ -11,6 +11,7 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from typing import Dict, Any, Optional
 from playwright.async_api import async_playwright
+from utils import extract_links, remove_duplicate_links, classify_url
 
 # Configure logging
 import logging
@@ -186,3 +187,84 @@ async def direct_function(body: Dict[str, Any] = Body(...)):
         
     request = CrawlRequest(url=url, bypass_cache=bypass_cache)
     return await crawl(request)
+
+
+@app.post("/fetch_link")
+async def fetch_link(request: CrawlRequest):
+    if classify_url(request.url) != "Website":
+        return request.url
+
+    start_time = time.time()
+    logger.info(f"Crawling URL: {request.url}")
+
+    if not request.url.startswith(('http://', 'https://')):
+        raise HTTPException(status_code=400, detail="URL must start with http:// or https://")
+
+    try:
+        # Use direct Playwright approach
+        async with async_playwright() as p:
+            # Launch browser with specific args
+            browser = await p.chromium.launch(
+                args=['--no-sandbox', '--disable-dev-shm-usage']
+            )
+
+            # Create a new context and page
+            context = await browser.new_context()
+            page = await context.new_page()
+
+            # Navigate to the URL
+            await page.goto(request.url, wait_until="networkidle")
+
+            # Extract content
+            title = await page.title()
+            content = await page.content()
+            text = await page.evaluate('() => document.body.innerText')
+
+            # Get all links
+            links = await page.evaluate("""
+                    () => Array.from(document.querySelectorAll('a')).map(a => {
+                        return {
+                            href: a.href,
+                            text: a.innerText.trim()
+                        };
+                    })
+                """)
+
+            # Get meta tags
+            meta_tags = await page.evaluate("""
+                    () => Array.from(document.querySelectorAll('meta')).map(meta => {
+                        return {
+                            name: meta.getAttribute('name'),
+                            property: meta.getAttribute('property'),
+                            content: meta.getAttribute('content')
+                        };
+                    })
+                """)
+
+            # Close browser
+            await browser.close()
+
+            # Create result
+            result = {
+                "url": request.url,
+                "title": title,
+                "text": text[:10000] if len(text) > 10000 else text,  # Truncate if too long
+                "links": links[:100] if len(links) > 100 else links,  # Limit number of links
+                "meta_tags": meta_tags,
+                "html_length": len(content),
+                "crawl_time": time.time() - start_time
+            }
+
+            rdl = remove_duplicate_links(links)
+            clean_data = extract_links(rdl)
+
+            elapsed_time = time.time() - start_time
+            logger.info(f"Crawl successful. Time: {elapsed_time:.2f}s")
+            return clean_data
+
+    except Exception as e:
+        error_message = f"Error during crawling: {str(e)}"
+        logger.error(error_message)
+        logger.error(traceback.format_exc())
+        return {"error": error_message, "url": request.url}
+
